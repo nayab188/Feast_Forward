@@ -3,6 +3,8 @@ import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
 from werkzeug.utils import secure_filename
+import pandas as pd
+from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = 'feast_forward_nayab'
@@ -169,6 +171,23 @@ def get_restaurant_id(user_id):
             (user_id,)
         )
         return cur.fetchone()[0]
+
+def get_last_30d_avg(restaurant_id, menu_item):
+    path = f"uploads/user_{restaurant_id}/{menu_item.lower().replace(' ', '_')}.csv"
+
+    if not os.path.exists(path):
+        return 0
+
+    df = pd.read_csv(path)
+
+    if "Date" not in df.columns or "no_of_servings" not in df.columns:
+        return 0
+
+    df["Date"] = pd.to_datetime(df["Date"],format="%d-%m-%Y")
+    last_30 = df.sort_values("Date").tail(30)
+
+    return float(last_30["no_of_servings"].mean())
+
 def save_csv(restaurant_id, menu_item, csv_file):
     base_dir = f"uploads/user_{restaurant_id}"
     os.makedirs(base_dir, exist_ok=True)
@@ -255,15 +274,21 @@ def predict():
         return redirect("/login")
 
     menu_item = request.form["menu_item"]
+    restaurant_id = get_restaurant_id(session["user_id"])
+
+    date_obj = datetime.strptime(request.form["date"], "%Y-%m-%d")
 
     features = {
-        "date": request.form["date"],
-        "temperature": request.form.get("temperature"),
-        "event": request.form.get("event"),
-        "holiday": int(request.form.get("holiday", 0))
+        "day_of_week": date_obj.strftime("%A"),
+        "meal_period": request.form["meal_period"],
+        "is_holiday": int(request.form.get("holiday", 0)),
+        "weather": request.form["weather"],
+        "temperature": float(request.form.get("temperature", 25)),
+        "sales_last_30d_avg": get_last_30d_avg(
+            restaurant_id,
+            menu_item
+        )
     }
-
-    restaurant_id = get_restaurant_id(session["user_id"])
 
     from ml.predict import predict_demand
 
@@ -274,6 +299,7 @@ def predict():
     )
 
     context = load_dashboard_context(restaurant_id, session["user_id"])
+
     if "error" in prediction:
         return render_template(
             "dashboard.html",
@@ -282,7 +308,9 @@ def predict():
             predictions=[],
             **context
         )
+
     predictions = load_predictions(restaurant_id)
+
     return render_template(
         "dashboard.html",
         prediction=prediction,
@@ -290,7 +318,6 @@ def predict():
         predictions=predictions,
         **context
     )
-
 
 @app.route("/save-prediction", methods=["POST"])
 def save_prediction():

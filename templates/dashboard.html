@@ -97,7 +97,7 @@
             </tr>
           </thead>
 
-          
+
           <tbody>
             {% if predictions %}
             {% for p in predictions %}
@@ -153,6 +153,19 @@
           <option value="0">No Holiday</option>
           <option value="1">Holiday</option>
         </select>
+        
+        <!-- ungli -->
+        <select name="meal_period" required>
+          <option value="Lunch">Lunch</option>
+          <option value="Dinner">Dinner</option>
+        </select>
+
+        <select name="weather" required>
+          <option value="Sunny">Sunny</option>
+          <option value="Rainy">Rainy</option>
+          <option value="Cloudy">Cloudy</option>
+        </select>
+        <!-- ungli : end -->
 
         <button type="submit">Predict</button>
       </form>
