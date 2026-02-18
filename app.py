@@ -43,6 +43,42 @@ with get_db() as con:
                     predicted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     servings INTEGER
                 )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS recipe_mapping (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    restaurant_id INTEGER NOT NULL,
+                    menu_item TEXT NOT NULL,
+                    ingredient_name TEXT NOT NULL,
+                    qty_per_serving REAL NOT NULL,
+                    unit TEXT NOT NULL,
+                    FOREIGN KEY (restaurant_id) 
+                    REFERENCES restaurants(id) 
+                    ON DELETE CASCADE
+                 )""")
+    cur.execute(""" CREATE TABLE IF NOT EXISTS staff_mapping (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    restaurant_id INTEGER NOT NULL,
+                    menu_item TEXT NOT NULL,
+                    base_servings INTEGER NOT NULL,
+                    cooks INTEGER NOT NULL,
+                    helpers INTEGER NOT NULL,
+                    cleaners INTEGER NOT NULL,
+                    FOREIGN KEY (restaurant_id)
+                        REFERENCES restaurants(id)
+                        ON DELETE CASCADE
+                )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS staff_predictions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        restaurant_id INTEGER,
+                        menu_item TEXT,
+                        predicted_servings INTEGER,
+                        cooks INTEGER,
+                        helpers INTEGER,
+                        cleaners INTEGER,
+                        calculated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )""")
+
+            
+
 
     con.commit()
 
@@ -124,6 +160,7 @@ def dashboard():
 
         restaurant_id = row[0]
 
+
         user = {
             "restaurant_name": row[1]
         }
@@ -144,15 +181,31 @@ def dashboard():
 
     menu_items = get_trained_menu_items(restaurant_id)
 
+    recipe_exists = has_recipe_setup(restaurant_id)
+    staff_history = load_staff_history(restaurant_id)
+
+
     return render_template(
         'dashboard.html',
         user=user,
         services=services,
         predictions=predictions,
-        menu_items=menu_items
+        staff_history=staff_history,
+        menu_items=menu_items,
+        recipe_exists=recipe_exists,
+        auto_open_manage=False
     )
 
-    
+
+def has_recipe_setup(restaurant_id):
+    with get_db() as con:
+        cur = con.execute(
+            "SELECT COUNT(*) FROM recipe_mapping WHERE restaurant_id = ?",
+            (restaurant_id,)
+        )
+        count = cur.fetchone()[0]
+        return count > 0
+
 
 def get_trained_menu_items(restaurant_id):
     base_path = f"ml/storage/user_{restaurant_id}"
@@ -187,6 +240,21 @@ def get_last_30d_avg(restaurant_id, menu_item):
     last_30 = df.sort_values("Date").tail(30)
 
     return float(last_30["no_of_servings"].mean())
+def calculate_staff(base_servings, predicted_servings, cooks, helpers, cleaners):
+    if base_servings == 0:
+        return {
+            "cooks": 0,
+            "helpers": 0,
+            "cleaners": 0
+        }
+    multiplier = predicted_servings / base_servings
+
+    return {
+        "cooks": round(cooks * multiplier),
+        "helpers": round(helpers * multiplier),
+        "cleaners": round(cleaners * multiplier)
+    }
+
 
 def save_csv(restaurant_id, menu_item, csv_file):
     base_dir = f"uploads/user_{restaurant_id}"
@@ -267,6 +335,17 @@ def load_predictions(restaurant_id):
             ORDER BY predicted_at DESC
         """, (restaurant_id,))
         return cur.fetchall()
+    
+def load_staff_history(restaurant_id):
+    with get_db() as con:
+        cur = con.cursor()
+        cur.execute("""
+            SELECT menu_item, predicted_servings, cooks, helpers, cleaners, calculated_at
+            FROM staff_predictions
+            WHERE restaurant_id = ?
+            ORDER BY calculated_at DESC
+        """, (restaurant_id,))
+        return cur.fetchall()    
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -301,21 +380,28 @@ def predict():
     context = load_dashboard_context(restaurant_id, session["user_id"])
 
     if "error" in prediction:
+        recipe_exists = has_recipe_setup(restaurant_id)
         return render_template(
             "dashboard.html",
             error=prediction["error"],
             menu_items=get_trained_menu_items(restaurant_id),
             predictions=[],
+            recipe_exists=recipe_exists,
+            auto_open_manage=False,
             **context
         )
 
     predictions = load_predictions(restaurant_id)
+    recipe_exists = has_recipe_setup(restaurant_id)
 
     return render_template(
         "dashboard.html",
         prediction=prediction,
+        staff_history=load_staff_history(restaurant_id),
         menu_items=get_trained_menu_items(restaurant_id),
         predictions=predictions,
+        recipe_exists=recipe_exists,
+        auto_open_manage=False,
         **context
     )
 
@@ -343,6 +429,232 @@ def save_prediction():
         con.commit()
 
     return redirect("/dashboard")
+
+@app.route("/grocery-setup", methods=["POST"])
+def grocery_setup():
+    if "user_id" not in session:
+        return redirect("/login")
+
+    restaurant_id = get_restaurant_id(session["user_id"])
+
+    menu_item = request.form["menu_item"]
+    ingredients = request.form.getlist("ingredient_name[]")
+    quantities = request.form.getlist("qty_per_serving[]")
+    units = request.form.getlist("unit[]")
+
+    with get_db() as con:
+        cur = con.cursor()
+
+        cur.execute("""
+            DELETE FROM recipe_mapping
+            WHERE restaurant_id = ?
+            AND menu_item = ?
+        """, (restaurant_id, menu_item))
+
+        for name, qty, unit in zip(ingredients, quantities, units):
+            if name.strip() == "":
+                continue
+
+            cur.execute("""
+                INSERT INTO recipe_mapping
+                (restaurant_id, menu_item, ingredient_name, qty_per_serving, unit)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                restaurant_id,
+                menu_item,
+                name.strip(),
+                float(qty),
+                unit.strip()
+            ))
+
+        con.commit()
+
+    return redirect("/dashboard")
+
+@app.route("/calculate-groceries", methods=["POST"])
+def calculate_groceries():
+    if "user_id" not in session:
+        return redirect("/login")
+
+    restaurant_id = get_restaurant_id(session["user_id"])
+
+    menu_item = request.form["menu_item"]
+    servings = float(request.form["servings"])
+
+    with get_db() as con:
+        cur = con.cursor()
+        cur.execute("""
+            SELECT ingredient_name, qty_per_serving, unit
+            FROM recipe_mapping
+            WHERE restaurant_id = ?
+            AND menu_item = ?
+        """, (restaurant_id, menu_item))
+
+        rows = cur.fetchall()
+
+    if not rows:
+        context = load_dashboard_context(restaurant_id, session["user_id"])
+        recipe_exists = has_recipe_setup(restaurant_id)
+
+        return render_template(
+            "dashboard.html",
+            error="No recipe defined for this menu item.",
+            menu_items=get_trained_menu_items(restaurant_id),
+            staff_history=load_staff_history(restaurant_id),
+            predictions=load_predictions(restaurant_id),
+            recipe_exists=recipe_exists,
+            auto_open_manage=True,
+            **context
+        )
+
+
+    results = []
+    for ingredient, qty_per_serving, unit in rows:
+        required = round(qty_per_serving * servings, 2)
+        results.append({
+            "ingredient": ingredient,
+            "required": required,
+            "unit": unit
+        })
+
+    context = load_dashboard_context(restaurant_id, session["user_id"])
+    recipe_exists = has_recipe_setup(restaurant_id)
+
+
+    return render_template(
+    "dashboard.html",
+    grocery_results=results,
+    selected_menu=menu_item,
+    entered_servings=servings,
+    menu_items=get_trained_menu_items(restaurant_id),
+    staff_history=load_staff_history(restaurant_id),
+    predictions=load_predictions(restaurant_id),
+    recipe_exists=recipe_exists,
+    auto_open_manage=True,
+    **context
+    )
+
+@app.route("/save-staff-config", methods=["POST"])
+def save_staff_config():
+    if "user_id" not in session:
+        return redirect("/login")
+
+    restaurant_id = get_restaurant_id(session["user_id"])
+
+    menu_items = request.form.getlist("menu_item[]")
+    base_servings = request.form.getlist("base_servings[]")
+    cooks = request.form.getlist("cooks[]")
+    helpers = request.form.getlist("helpers[]")
+    cleaners = request.form.getlist("cleaners[]")
+
+    with get_db() as con:
+        cur = con.cursor()
+
+        for m, b, c, h, cl in zip(menu_items, base_servings, cooks, helpers, cleaners):
+
+            cur.execute("""
+                DELETE FROM staff_mapping
+                WHERE restaurant_id = ?
+                AND menu_item = ?
+            """, (restaurant_id, m))
+
+            cur.execute("""
+                INSERT INTO staff_mapping
+                (restaurant_id, menu_item, base_servings, cooks, helpers, cleaners)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                restaurant_id,
+                m,
+                int(b),
+                int(c),
+                int(h),
+                int(cl)
+            ))
+
+        con.commit()
+
+    return redirect("/dashboard")
+
+@app.route("/calculate-staff", methods=["POST"])
+def calculate_staff_route():
+    if "user_id" not in session:
+        return redirect("/login")
+
+    restaurant_id = get_restaurant_id(session["user_id"])
+    menu_item = request.form["menu_item"]
+    predicted_servings = int(request.form["predicted_servings"])
+
+    with get_db() as con:
+        cur = con.cursor()
+        cur.execute("""
+            SELECT base_servings, cooks, helpers, cleaners
+            FROM staff_mapping
+            WHERE restaurant_id = ?
+            AND menu_item = ?
+        """, (restaurant_id, menu_item))
+
+        row = cur.fetchone()
+
+    if not row:
+        context = load_dashboard_context(restaurant_id, session["user_id"])
+        return render_template(
+            "dashboard.html",
+            error="No staff configuration found for this menu item.",
+            menu_items=get_trained_menu_items(restaurant_id),
+            predictions=load_predictions(restaurant_id),
+            staff_history=load_staff_history(restaurant_id),
+            recipe_exists=has_recipe_setup(restaurant_id),
+            auto_open_manage=False,
+            **context
+        )
+
+    base_servings, cooks, helpers, cleaners = row
+
+    result = calculate_staff(
+        base_servings,
+        predicted_servings,
+        cooks,
+        helpers,
+        cleaners
+    )
+
+    staff_results = {
+        "menu_item": menu_item,
+        "servings": predicted_servings,
+        "cooks": result["cooks"],
+        "helpers": result["helpers"],
+        "cleaners": result["cleaners"]
+    }
+
+    context = load_dashboard_context(restaurant_id, session["user_id"])
+    with get_db() as con:
+        con.execute("""
+            INSERT INTO staff_predictions
+            (restaurant_id, menu_item, predicted_servings, cooks, helpers, cleaners)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            restaurant_id,
+            menu_item,
+            predicted_servings,
+            result["cooks"],
+            result["helpers"],
+            result["cleaners"]
+        ))
+        con.commit()
+
+
+    return render_template(
+        "dashboard.html",
+        staff_results=staff_results,
+        staff_history=load_staff_history(restaurant_id), 
+        menu_items=get_trained_menu_items(restaurant_id),
+        predictions=load_predictions(restaurant_id),
+        recipe_exists=has_recipe_setup(restaurant_id),
+        auto_open_manage=False,
+        **context
+    )
+    # return redirect("/dashboard")
+
 
 
 

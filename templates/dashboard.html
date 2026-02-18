@@ -17,10 +17,10 @@
 
       <nav>
         {% if services.grocery %}
-        <a href="/grocery">🥦 Grocery Management</a>
+        <a href="#" onclick="openGrocery()">🥦 Grocery Management</a>
         {% endif %}
         {% if services.staff %}
-        <a href="/staff">👨‍🍳 Staff Management</a>
+        <a href="#" onclick="openStaff()">👨‍🍳 Staff Management</a>
         {% endif %}
         {% if services.combo %}
         <a href="/combo">🍱 Combo Creation</a>
@@ -123,6 +123,98 @@
         </button>
       </section>
 
+      {% if grocery_results %}
+      <section class="card">
+        <h3>📦 Required Grocery List</h3>
+        <p>
+          Menu: <strong>{{ selected_menu }}</strong><br>
+          Servings: <strong>{{ entered_servings }}</strong>
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Ingredient</th>
+              <th>Required Quantity</th>
+              <th>Unit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in grocery_results %}
+            <tr>
+              <td>{{ item.ingredient }}</td>
+              <td>{{ item.required }}</td>
+              <td>{{ item.unit }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        <button onclick="window.print()">🖨 Print</button>
+      </section>
+      {% endif %}
+
+      {% if staff_results %}
+      <section class="card">
+        <h3>👨‍🍳 Daily Staff Requirement</h3>
+
+        <p>
+          Menu: <strong>{{ staff_results.menu_item }}</strong><br>
+          Servings: <strong>{{ staff_results.servings }}</strong>
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Cooks</th>
+              <th>Helpers</th>
+              <th>Cleaners</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>{{ staff_results.cooks }}</td>
+              <td>{{ staff_results.helpers }}</td>
+              <td>{{ staff_results.cleaners }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <button onclick="window.print()">🖨 Print</button>
+      </section>
+      {% endif %}
+      {% if staff_history %}
+      <section class="card">
+        <h3>📊 Staff Planning History</h3>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Menu Item</th>
+              <th>Servings</th>
+              <th>Cooks</th>
+              <th>Helpers</th>
+              <th>Cleaners</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in staff_history %}
+            <tr>
+              <td>{{ s[0] }}</td>
+              <td>{{ s[1] }}</td>
+              <td>{{ s[2] }}</td>
+              <td>{{ s[3] }}</td>
+              <td>{{ s[4] }}</td>
+              <td>{{ s[5] }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+      {% endif %}
+
+
 
     </main>
   </div>
@@ -153,7 +245,7 @@
           <option value="0">No Holiday</option>
           <option value="1">Holiday</option>
         </select>
-        
+
         <!-- ungli -->
         <select name="meal_period" required>
           <option value="Lunch">Lunch</option>
@@ -199,6 +291,162 @@
 
     </div>
   </div>
+  <!-- grocery module ki vocche pop up -->
+  <div class="modal" id="groceryModal">
+    <div class="modal-card">
+
+      <h2>🥦 Grocery Setup</h2>
+
+      {% if not menu_items %}
+      <p>Your menu is empty.</p>
+      <p>Please upload sales data and train menu items first.</p>
+      {% else %}
+
+      <form method="POST" action="/grocery-setup">
+
+        <select name="menu_item" required>
+          <option value="" disabled selected>Select Menu Item</option>
+          {% for item in menu_items %}
+          <option value="{{ item }}">{{ item }}</option>
+          {% endfor %}
+        </select>
+
+        <div id="ingredientsContainer" style="margin-top:20px;">
+          <div class="grid">
+            <input type="text" name="ingredient_name[]" placeholder="Ingredient Name" required>
+            <input type="number" step="0.01" name="qty_per_serving[]" placeholder="Qty per Serving" required>
+            <input type="text" name="unit[]" placeholder="Unit (kg, liters, pcs)" required>
+          </div>
+        </div>
+
+        <button type="button" onclick="addIngredientRow()" class="add-btn">
+          ➕ Add Ingredient
+        </button>
+
+        <button type="submit">
+          Save Recipe
+        </button>
+
+        <hr style="margin:20px 0;">
+        {% if recipe_exists %}
+        <button type="button" class="process-btn" onclick="switchToManage()">
+          🛒 Manage Groceries
+        </button>
+        {% endif %}
+
+      </form>
+
+      {% endif %}
+
+      <span class="close" onclick="closeGrocery()">✖</span>
+
+    </div>
+  </div>
+  <div class="modal" id="manageGroceryModal">
+    <div class="modal-card">
+
+      <h2>🛒 Manage Groceries</h2>
+
+      {% if not menu_items %}
+      <p>Your menu is empty.</p>
+      {% else %}
+
+      <form method="POST" action="/calculate-groceries">
+
+        <select name="menu_item" required>
+          <option value="" disabled selected>Select Menu Item</option>
+          {% for item in menu_items %}
+          <option value="{{ item }}">{{ item }}</option>
+          {% endfor %}
+        </select>
+
+        <input type="number" step="1" name="servings" placeholder="Enter Servings" required>
+
+        <button type="submit">
+          Calculate Requirements
+        </button>
+
+      </form>
+
+      {% endif %}
+
+      <span class="close" onclick="closeManageGrocery()">✖</span>
+
+    </div>
+  </div>
+  <!-- Staff Management ki ochhe pop up-->
+  <div class="modal" id="staffModal">
+    <div class="modal-card">
+
+      <h2>👨‍🍳 Staff Management</h2>
+
+      {% if not menu_items %}
+      <p>Your menu is empty.</p>
+      <p>Please upload and train menu items first.</p>
+      {% else %}
+
+      <form method="POST" action="/save-staff-config">
+
+        <div id="staffContainer">
+
+          <div class="grid" style="margin-top:15px;">
+            <select name="menu_item[]" required>
+              <option value="" disabled selected>Select Menu Item</option>
+              {% for item in menu_items %}
+              <option value="{{ item }}">{{ item }}</option>
+              {% endfor %}
+            </select>
+
+            <input type="number" name="base_servings[]" placeholder="Base Servings (e.g. 100)" required>
+
+            <input type="number" name="cooks[]" placeholder="No. of Cooks" required>
+
+            <input type="number" name="helpers[]" placeholder="No. of Helpers" required>
+
+            <input type="number" name="cleaners[]" placeholder="No. of Cleaners" required>
+          </div>
+
+        </div>
+
+        <button type="button" class="add-btn" onclick="addStaffRow()">
+          ➕ Add Menu Item
+        </button>
+
+        <button type="submit">
+          Save Staff Configuration
+        </button>
+
+      </form>
+
+      <hr style="margin:25px 0;">
+
+
+      <form method="POST" action="/calculate-staff">
+
+        <select name="menu_item" required>
+          <option value="" disabled selected>Select Menu Item</option>
+          {% for item in menu_items %}
+          <option value="{{ item }}">{{ item }}</option>
+          {% endfor %}
+        </select>
+
+        <input type="number" name="predicted_servings" placeholder="Enter Predicted Servings" required>
+
+        <button type="submit" class="process-btn">
+          Calculate Staff
+        </button>
+
+      </form>
+
+      {% endif %}
+
+      <span class="close" onclick="closeStaff()">✖</span>
+
+    </div>
+  </div>
+
+
+
 
 
 </body>
@@ -235,6 +483,87 @@
 
     container.appendChild(row);
   }
+
+  function openGrocery() {
+    document.getElementById("groceryModal").style.display = "flex";
+  }
+
+  function closeGrocery() {
+    document.getElementById("groceryModal").style.display = "none";
+  }
+
+  function addIngredientRow() {
+    const container = document.getElementById("ingredientsContainer");
+
+    const row = document.createElement("div");
+    row.className = "grid";
+    row.style.marginTop = "10px";
+
+    row.innerHTML = `
+    <input type="text" name="ingredient_name[]" placeholder="Ingredient Name" required>
+    <input type="number" step="0.01" name="qty_per_serving[]" placeholder="Qty per Serving" required>
+    <input type="text" name="unit[]" placeholder="Unit (kg, liters, pcs)" required>
+  `;
+
+    container.appendChild(row);
+  }
+  function openManageGrocery() {
+    document.getElementById("manageGroceryModal").style.display = "flex";
+  }
+
+  function closeManageGrocery() {
+    document.getElementById("manageGroceryModal").style.display = "none";
+  }
+  function switchToManage() {
+    closeGrocery();
+    openManageGrocery();
+  }
+  window.addEventListener("DOMContentLoaded", function () {
+    const autoOpen = "{{ auto_open_manage }}" === "True";
+
+    if (autoOpen) {
+      openManageGrocery();
+    }
+  });
+  function openStaff() {
+    document.getElementById("staffModal").style.display = "flex";
+  }
+
+  function closeStaff() {
+    document.getElementById("staffModal").style.display = "none";
+  }
+
+  function addStaffRow() {
+    const container = document.getElementById("staffContainer");
+
+    const row = document.createElement("div");
+    row.className = "grid";
+    row.style.marginTop = "10px";
+
+    row.innerHTML = `
+    <select name="menu_item[]" required>
+      <option value="" disabled selected>Select Menu Item</option>
+      {% for item in menu_items %}
+        <option value="{{ item }}">{{ item }}</option>
+      {% endfor %}
+    </select>
+
+    <input type="number" name="base_servings[]" 
+           placeholder="Base Servings" required>
+
+    <input type="number" name="cooks[]" 
+           placeholder="No. of Cooks" required>
+
+    <input type="number" name="helpers[]" 
+           placeholder="No. of Helpers" required>
+
+    <input type="number" name="cleaners[]" 
+           placeholder="No. of Cleaners" required>
+  `;
+
+    container.appendChild(row);
+  }
+
 
 
 </script>
