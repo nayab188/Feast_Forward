@@ -23,7 +23,7 @@
         <a href="#" onclick="openStaff()">👨‍🍳 Staff Management</a>
         {% endif %}
         {% if services.combo %}
-        <a href="/combo">🍱 Combo Creation</a>
+        <a href="#" onclick="openComboModal()">🍱 Combo Creation</a>
         {% endif %}
       </nav>
       <div class="sidebar-bottom">
@@ -212,6 +212,28 @@
           </tbody>
         </table>
       </section>
+      {% endif %}
+      {% if combos %}
+      <div class="card">
+        <h3>Predicted Combos</h3>
+        <table>
+          <tr>
+            <th>Combo Name</th>
+            <th>Discount</th>
+            <th>Final Price</th>
+            <th>Date</th>
+          </tr>
+
+          {% for c in combos %}
+          <tr>
+            <td>{{ c[0] }}</td>
+            <td>{{ c[2] }}%</td>
+            <td>₹{{ c[1] }}</td>
+            <td>{{ c[3] }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </div>
       {% endif %}
 
 
@@ -444,6 +466,107 @@
 
     </div>
   </div>
+  <!-- COMBO MODAL -->
+  <div class="modal" id="comboModal">
+    <div class="modal-card">
+
+      <span class="close" onclick="closeComboModal()">✖</span>
+
+      <h2>Create Smart Combo</h2>
+
+      {% if menu_items|length < 3 %}
+    <div class="error-msg">
+        Minimum 3 food items required to make combo.
+        Please prepare menu first!
+    </div>
+    {% else %}
+
+    <form method="post" action="/prepare-combo">
+
+      <div id="comboItemsContainer">
+
+        <!-- <div class="menu-row">
+          <select name="menu_item[]" required>
+            {% for item in menu_items %}
+            <option value="{{ item }}">{{ item }}</option>
+            {% endfor %}
+          </select>
+
+          <input type="number" name="predicted_servings[]" placeholder="Predicted Servings" required>
+
+          <input type="number" name="sold_quantity[]" placeholder="Sold Quantity" required>
+        </div> -->
+        <div class="menu-row">
+
+          <select name="menu_item[]" required>
+            {% for item in menu_items %}
+            <option value="{{ item }}">{{ item }}</option>
+            {% endfor %}
+          </select>
+
+          <input type="number" name="predicted_servings[]" placeholder="Predicted Servings" required>
+
+          <input type="number" name="sold_quantity[]" placeholder="Sold Quantity" required>
+
+          <input type="number" step="0.01" name="cost_per_item[]" placeholder="Cost Per Item (₹)" required>
+
+        </div>
+
+
+      </div>
+
+      <button type="button" onclick="addComboRow()" class="add-btn">
+        + Add Item
+      </button>
+
+      <button type="submit" class="process-btn">
+        Submit
+      </button>
+
+    </form>
+
+    {% endif %}
+    {% if show_discount_options %}
+
+    <div class="prediction-result">
+
+      <h3>Select Discount</h3>
+
+      <form method="post" action="/create-combo">
+
+        <input type="hidden" name="combo_data" value='{{ combo_data|tojson }}'>
+        <input type="hidden" name="total_cost" value="{{ total_cost }}">
+        <select name="discount" required>
+          <option value="-3">-3%</option>
+          <option value="-5">-5%</option>
+          <option value="-10">-10%</option>
+          <option value="-15">-15%</option>
+          <option value="-20">-20%</option>
+        </select>
+
+        <button type="submit" class="save-btn">
+          Make Combo
+        </button>
+
+      </form>
+
+    </div>
+
+    {% endif %}
+  </div>
+  </div>
+
+
+
+
+
+  {% if show_discount_options %}
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      openComboModal();
+    });
+  </script>
+  {% endif %}
 
 
 
@@ -564,6 +687,48 @@
     container.appendChild(row);
   }
 
+
+  function openComboModal() {
+    document.getElementById("comboModal").style.display = "flex";
+  }
+
+  function closeComboModal() {
+    document.getElementById("comboModal").style.display = "none";
+  }
+
+  function addComboRow() {
+
+    const container = document.getElementById("comboItemsContainer");
+
+    const row = document.createElement("div");
+    row.classList.add("menu-row");
+
+    row.innerHTML = `
+    <select name="menu_item[]" required>
+      {% for item in menu_items %}
+      <option value="{{ item }}">{{ item }}</option>
+      {% endfor %}
+    </select>
+
+    <input type="number"
+           name="predicted_servings[]"
+           placeholder="Predicted Servings"
+           required>
+
+    <input type="number"
+           name="sold_quantity[]"
+           placeholder="Sold Quantity"
+           required>
+
+    <input type="number"
+           step="0.01"
+           name="cost_per_item[]"
+           placeholder="Cost Per Item (₹)"
+           required>
+  `;
+
+    container.appendChild(row);
+  }
 
 
 </script>

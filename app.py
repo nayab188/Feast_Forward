@@ -76,6 +76,20 @@ with get_db() as con:
                         cleaners INTEGER,
                         calculated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS combos (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        restaurant_id INTEGER,
+                        combo_name TEXT,
+                        items TEXT,
+                        total_cost REAL,
+                        discount_percent REAL,
+                        final_price REAL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (restaurant_id)
+                            REFERENCES restaurants(id)
+                            ON DELETE CASCADE
+                    )""")
+
 
             
 
@@ -183,6 +197,8 @@ def dashboard():
 
     recipe_exists = has_recipe_setup(restaurant_id)
     staff_history = load_staff_history(restaurant_id)
+    combos = load_combos(restaurant_id)
+
 
 
     return render_template(
@@ -191,6 +207,7 @@ def dashboard():
         services=services,
         predictions=predictions,
         staff_history=staff_history,
+        combos=combos,
         menu_items=menu_items,
         recipe_exists=recipe_exists,
         auto_open_manage=False
@@ -654,7 +671,112 @@ def calculate_staff_route():
         **context
     )
     # return redirect("/dashboard")
+@app.route("/prepare-combo", methods=["POST"])
+def prepare_combo():
 
+    if "user_id" not in session:
+        return redirect("/login")
+
+    restaurant_id = get_restaurant_id(session["user_id"])
+
+    menu_items = request.form.getlist("menu_item[]")
+    predicted = request.form.getlist("predicted_servings[]")
+    sold = request.form.getlist("sold_quantity[]")
+    costs = request.form.getlist("cost_per_item[]")
+
+    
+
+    combo_data = []
+    total_cost = 0
+
+    for m, p, s, c in zip(menu_items, predicted, sold, costs):
+
+        leftover = int(p) - int(s)
+
+        if leftover <= 0:
+            continue
+
+        item_cost = float(c)
+
+        combo_data.append({
+            "menu_item": m,
+            "leftover": leftover,
+            "cost_per_item": item_cost
+        })
+
+        total_cost += item_cost
+
+    context = load_dashboard_context(restaurant_id, session["user_id"])
+    if len(combo_data) < 3:
+        return redirect("/dashboard")
+
+    return render_template(
+        "dashboard.html",
+        show_discount_options=True,
+        combo_data=combo_data,
+        total_cost=total_cost,
+        menu_items=get_trained_menu_items(restaurant_id),
+        predictions=load_predictions(restaurant_id),
+        staff_history=load_staff_history(restaurant_id),
+        combos=load_combos(restaurant_id),   # ADD THIS
+        recipe_exists=has_recipe_setup(restaurant_id),
+        **context
+    )
+
+
+
+@app.route("/create-combo", methods=["POST"])
+def create_combo():
+
+    if "user_id" not in session:
+        return redirect("/login")
+
+    restaurant_id = get_restaurant_id(session["user_id"])
+
+    import json
+
+    combo_data = json.loads(request.form["combo_data"])
+    discount = float(request.form["discount"])
+
+    total_cost = sum(item["cost_per_item"] for item in combo_data)
+
+    final_price = round(
+        total_cost * (1 + discount / 100),
+        2
+    )
+    
+    combo_name = " + ".join([item["menu_item"] for item in combo_data])
+    combo_name = combo_name + "(Super Saver)"
+
+    with get_db() as con:
+        con.execute("""
+            INSERT INTO combos
+            (restaurant_id, combo_name, items,
+             total_cost, discount_percent, final_price)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            restaurant_id,
+            combo_name,
+            json.dumps(combo_data),
+            total_cost,
+            discount,
+            final_price
+        ))
+        con.commit()
+
+    return redirect("/dashboard")
+
+
+def load_combos(restaurant_id):
+    with get_db() as con:
+        cur = con.cursor()
+        cur.execute("""
+            SELECT combo_name, final_price, discount_percent, created_at
+            FROM combos
+            WHERE restaurant_id = ?
+            ORDER BY created_at DESC
+        """, (restaurant_id,))
+        return cur.fetchall()
 
 
 
